@@ -33,13 +33,15 @@ function answerJev(body) {
   const noRewrite = request.includes("[NO_REWRITE]");
   const weakOne = request.includes("[WEAK_ONE]");
   const weakTwo = request.includes("[WEAK_TWO]");
+  const technicalDoc = request.includes("[TECH_DOC]");
 
   for (const key of Object.keys(body?.questions ?? {})) {
     let p = 0.08;
-    if (!noRewrite && !weakOne && !weakTwo && key === "pattern_01_not_x_but_y") p = 0.98;
+    if (!noRewrite && !weakOne && !weakTwo && !technicalDoc && key === "pattern_01_not_x_but_y") p = 0.98;
     if (weakOne && key === "pattern_08_dashes_as_the_universal_connector") p = 0.21;
     if (weakTwo && key === "pattern_08_dashes_as_the_universal_connector") p = 0.91;
     if (weakTwo && key === "pattern_09_stacked_qualifiers") p = 0.87;
+    if (technicalDoc && key === "technical_t03_flat_enumeration") p = 0.94;
     answers[key] = { noul: p };
   }
 

@@ -83,4 +83,5 @@ printf '%s
 ' "$OUT"
 grep -Fq 'Improve the wording without changing the substance.' <<<"$OUT"
 grep -Fq 'version: "3.0.0"' "$PKG/vendor/humanizer/SKILL.md"
-echo "install-smoke: AUTOLOAD_HUMANIZER_OK"
+grep -Fq 'name: humanizer-technical' "$PKG/vendor/humanizer-technical/SKILL.md"
+echo "install-smoke: AUTOLOAD_HUMANIZER_AND_TECHNICAL_OK"

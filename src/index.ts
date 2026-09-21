@@ -26,7 +26,7 @@ interface OriginalEntryData {
   original: string;
   rewriteModel: string;
   issues: Array<{
-    number: number;
+    label: string;
     title: string;
     probability: number;
     weakAlone: boolean;
@@ -275,7 +275,7 @@ function issueData(assessment: HumanizerAssessment): OriginalEntryData["issues"]
   return assessment.scores
     .filter((score) => score.present)
     .map((score) => ({
-      number: score.pattern.number,
+      label: score.pattern.label,
       title: score.pattern.title,
       probability: score.probability,
       weakAlone: score.pattern.weakAlone,
@@ -321,7 +321,7 @@ export default function antiSlop(pi: ExtensionAPI): void {
               .slice(0, 5)
               .map(
                 (issue) =>
-                  `§${issue.number} ${issue.title} ${issue.probability.toFixed(2)}${issue.weakAlone ? " weak" : ""}`,
+                  `${issue.label} ${issue.title} ${issue.probability.toFixed(2)}${issue.weakAlone ? " weak" : ""}`,
               )
               .join(", ")
           : "Humanizer";

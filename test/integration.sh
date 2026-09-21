@@ -259,6 +259,16 @@ if (( REWRITE_COUNT_AFTER - REWRITE_COUNT_BEFORE != 1 )); then
   exit 1
 fi
 
+# Technical supplement can trigger even when every base Humanizer pattern is low.
+REWRITE_COUNT_BEFORE="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
+TECH_DOC_OUTPUT="$(run_pi "[TECH_DOC] Review this technical architecture document.")"
+REWRITE_COUNT_AFTER="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
+grep -Fq 'Improve the wording without changing the substance.' <<<"$TECH_DOC_OUTPUT"
+if (( REWRITE_COUNT_AFTER - REWRITE_COUNT_BEFORE != 1 )); then
+  echo "integration failure: Humanizer Technical T3 did not trigger rewriting" >&2
+  exit 1
+fi
+
 # No post-rewrite judging: the only fallback is mechanical protocol failure.
 REWRITE_COUNT_BEFORE="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
 BAD_MARKER_OUTPUT="$(run_pi "[BAD_MARKER] Explain the recommended execution approach.")"
@@ -339,6 +349,7 @@ grep -aFq '[anti-slop original]' "$TMP/tui.log"
 grep -aFq 'anti-slop last · result=rewritten' "$TMP/tui.log"
 grep -aFq 'Humanizer=3.0.0@9862685' "$TMP/tui.log"
 grep -aFq 'decision=REWRITE' "$TMP/tui.log"
-grep -aFq '§01 Not X but Y' "$TMP/tui.log"
+grep -aFq '§1' "$TMP/tui.log"
+grep -aFq 'Technical=1.0.0' "$TMP/tui.log"
 
-echo "integration: Humanizer gate, weak-company policy, embedded rewrite, history replacement, final/all routing, tool-call preservation, fallback, TUI toggle, and /anti-slop last passed"
+echo "integration: Humanizer + Technical 33-pattern gate, technical-doc fallback coverage, embedded rewrite, history replacement, final/all routing, tool-call preservation, fallback, TUI toggle, and /anti-slop last passed"

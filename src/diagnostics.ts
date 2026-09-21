@@ -1,5 +1,6 @@
 import {
   HUMANIZER_COMMIT,
+  HUMANIZER_TECHNICAL_VERSION,
   HUMANIZER_VERSION,
   NOUL_TRUE_THRESHOLD,
   type HumanizerAssessment,
@@ -33,7 +34,7 @@ export function formatLastAssessment(last: LastAssessment | undefined): string {
 
   const lines = [
     `anti-slop last · result=${last.result}`,
-    `Humanizer=${HUMANIZER_VERSION}@${HUMANIZER_COMMIT.slice(0, 7)} · Noul true > ${NOUL_TRUE_THRESHOLD.toFixed(2)}`,
+    `Humanizer=${HUMANIZER_VERSION}@${HUMANIZER_COMMIT.slice(0, 7)} + Technical=${HUMANIZER_TECHNICAL_VERSION} · Noul true > ${NOUL_TRUE_THRESHOLD.toFixed(2)}`,
     `mode=${last.mode} · stopReason=${last.stopReason}`,
     `model=${last.rewriteModel ?? "(not set)"}`,
   ];
@@ -54,7 +55,7 @@ export function formatLastAssessment(last: LastAssessment | undefined): string {
         score.pattern.weakAlone ? "WEAK-ALONE" : "",
       ].filter(Boolean).join(" ");
       lines.push(
-        `  §${String(score.pattern.number).padStart(2, "0")} ${score.pattern.title.padEnd(38)} ${formatProbability(score.probability)}${flags ? `  ${flags}` : ""}`,
+        `  ${score.pattern.label.padEnd(3)} ${score.pattern.title.padEnd(38)} ${formatProbability(score.probability)}${flags ? `  ${flags}` : ""}`,
       );
     }
   }
