@@ -44,17 +44,27 @@ All questions are sent in one Jev request.
 
 ## Setup
 
-Set a TypeSafe API key:
+Install from GitHub:
 
 ```bash
-export TYPESAFE_API_KEY=...
+pi install https://github.com/FireSpoonYZ/pi-anti-slop
 ```
 
-Load the extension during development:
+Set a TypeSafe/Jev API key in the environment before starting Pi:
 
 ```bash
-pi -e ./src/index.ts
+export TYPESAFE_API_KEY="..."
+pi
 ```
+
+For a persistent shell setting:
+
+```bash
+echo 'export TYPESAFE_API_KEY="..."' >> ~/.bashrc
+source ~/.bashrc
+```
+
+`JEV_API_KEY` is accepted as a fallback alias.
 
 Choose the model that should perform rewrites:
 
@@ -68,6 +78,18 @@ Passing a model explicitly also works:
 /anti-slop model anthropic/claude-sonnet-4-5
 ```
 
+You can append a Pi thinking level to the model reference:
+
+```text
+/anti-slop model openai/gpt-model:high
+/anti-slop model anthropic/claude-model:medium
+/anti-slop model provider/model:off
+```
+
+Supported suffixes are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. Pi/provider model capability handling still applies. A model ID that itself contains a colon (for example an Ollama-style `model:tag`) is matched as a full model ID before interpreting a final colon suffix as a thinking level.
+
+The rewrite model is resolved through Pi's own model registry, so built-in providers, `models.json` providers, and extension-registered providers are all usable as long as they are configured/authenticated in Pi.
+
 Configuration is stored in `~/.pi/agent/anti-slop.json` by default. The default mode is `final`.
 
 ## Commands
@@ -77,7 +99,7 @@ Configuration is stored in `~/.pi/agent/anti-slop.json` by default. The default 
 /anti-slop mode off
 /anti-slop mode final
 /anti-slop mode all
-/anti-slop model [provider/model]
+/anti-slop model [provider/model[:thinking]]
 /anti-slop threshold 0.72
 /anti-slop validation-threshold 0.84
 ```
@@ -111,6 +133,7 @@ The Docker suite performs TypeScript checking, unit tests, and a Pi 0.86.1 end-t
 - `final` mode rewriting only the final `stop` turn
 - `all` mode rewriting both an intermediate `toolUse` turn and the final `stop` turn
 - tool-call preservation while intermediate text is rewritten
+- rewrite-model thinking suffix propagation to the provider request
 - protected inline code preservation
 - below-threshold no-rewrite path
 - failed post-rewrite validation falling back to the original

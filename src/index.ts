@@ -8,6 +8,7 @@ import {
 import { Container, Markdown, Text } from "@earendil-works/pi-tui";
 import { loadConfig, saveConfig, type AntiSlopConfig, type AntiSlopMode } from "./config.js";
 import { assessStyle, validateRewrite, type StyleAssessment } from "./jev.js";
+import { formatRewriteModelRef, parseRewriteModelRef } from "./model-ref.js";
 import { shouldProcessAssistant } from "./policy.js";
 import { protectLiterals, restoreLiterals, type ProtectedText } from "./protect.js";
 
@@ -114,15 +115,6 @@ function replaceAssistantTextBlocks(
   return { ...message, content };
 }
 
-function splitModelRef(ref: string): { provider: string; modelId: string } | undefined {
-  const slash = ref.indexOf("/");
-  if (slash <= 0 || slash === ref.length - 1) return undefined;
-  return {
-    provider: ref.slice(0, slash),
-    modelId: ref.slice(slash + 1),
-  };
-}
-
 function buildRewriteSystemPrompt(): string {
   return [
     "You are a conservative copy editor.",
@@ -172,8 +164,11 @@ async function rewriteWithConfiguredModel(
   message: AssistantMessage,
   assessment: StyleAssessment,
 ): Promise<{ text: string; blocks: string[] }> {
-  const parsed = splitModelRef(modelRef);
-  if (!parsed) throw new Error(`Invalid rewrite model reference: ${modelRef}`);
+  const parsed = parseRewriteModelRef(
+    modelRef,
+    (provider, modelId) => ctx.modelRegistry.find(provider, modelId),
+  );
+  if (!parsed) throw new Error(`Invalid or unavailable rewrite model: ${modelRef}`);
 
   const model = ctx.modelRegistry.find(parsed.provider, parsed.modelId);
   if (!model) throw new Error(`Rewrite model is unavailable: ${modelRef}`);
@@ -190,6 +185,7 @@ async function rewriteWithConfiguredModel(
     {
       signal: ctx.signal,
       temperature: 0.15,
+      reasoning: parsed.thinkingLevel === "off" ? undefined : parsed.thinkingLevel,
     },
   );
 
@@ -244,17 +240,21 @@ function explainConfig(config: AntiSlopConfig): string {
 async function chooseRewriteModel(
   ctx: ExtensionCommandContext,
 ): Promise<string | undefined> {
-  const models = ctx.scopedModels.length
-    ? ctx.scopedModels.map((entry) => entry.model)
-    : ctx.modelRegistry.getAvailable();
+  const refs = ctx.scopedModels.length
+    ? ctx.scopedModels.map((entry) => formatRewriteModelRef({
+        provider: entry.model.provider,
+        modelId: entry.model.id,
+        thinkingLevel: entry.thinkingLevel,
+      }))
+    : ctx.modelRegistry.getAvailable().map((model) => `${model.provider}/${model.id}`);
 
-  const refs = [...new Set(models.map((model) => `${model.provider}/${model.id}`))].sort();
-  if (refs.length === 0) {
+  const uniqueRefs = [...new Set(refs)].sort();
+  if (uniqueRefs.length === 0) {
     ctx.ui.notify("No configured models are available.", "error");
     return undefined;
   }
 
-  return ctx.ui.select("Anti-slop rewrite model", refs);
+  return ctx.ui.select("Anti-slop rewrite model", uniqueRefs);
 }
 
 export default function antiSlop(pi: ExtensionAPI): void {
@@ -359,12 +359,16 @@ export default function antiSlop(pi: ExtensionAPI): void {
           if (!ref) return;
         }
 
-        const parsed = splitModelRef(ref);
-        if (!parsed || !ctx.modelRegistry.find(parsed.provider, parsed.modelId)) {
-          ctx.ui.notify(`Model not found: ${ref}`, "error");
+        const parsed = parseRewriteModelRef(
+          ref,
+          (provider, modelId) => ctx.modelRegistry.find(provider, modelId),
+        );
+        if (!parsed) {
+          ctx.ui.notify(`Model not found or invalid thinking level: ${ref}`, "error");
           return;
         }
 
+        ref = formatRewriteModelRef(parsed);
         config = { ...config, rewriteModel: ref };
         persist();
         updateStatus(ctx, config, originalsVisible);
@@ -388,7 +392,7 @@ export default function antiSlop(pi: ExtensionAPI): void {
       }
 
       ctx.ui.notify(
-        "Usage: /anti-slop [status|mode off|final|all|on|off|model [provider/model]|threshold 0..1|validation-threshold 0..1]",
+        "Usage: /anti-slop [status|mode off|final|all|on|off|model [provider/model[:thinking]]|threshold 0..1|validation-threshold 0..1]",
         "info",
       );
     },

@@ -32,7 +32,7 @@ cat > "$PI_CODING_AGENT_DIR/models.json" <<'JSON'
       "apiKey": "mock-key",
       "compat": {
         "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false
+        "supportsReasoningEffort": true
       },
       "models": [
         {
@@ -47,7 +47,8 @@ cat > "$PI_CODING_AGENT_DIR/models.json" <<'JSON'
         {
           "id": "rewrite",
           "name": "Mock Rewrite",
-          "reasoning": false,
+          "reasoning": true,
+          "thinkingLevelMap": {"off":"none","minimal":"minimal","low":"low","medium":"medium","high":"high","xhigh":"xhigh","max":"max"},
           "input": ["text"],
           "contextWindow": 32000,
           "maxTokens": 4096,
@@ -62,7 +63,7 @@ JSON
 cat > "$PI_ANTI_SLOP_CONFIG" <<'JSON'
 {
   "mode": "final",
-  "rewriteModel": "mock/rewrite",
+  "rewriteModel": "mock/rewrite:high",
   "rewriteThreshold": 0.72,
   "validationThreshold": 0.84,
   "jevModel": "jev-latest",
@@ -142,6 +143,7 @@ printf '%s\n' "$OUTPUT"
 grep -Fq 'Improve the wording without changing the substance.' <<<"$OUTPUT"
 grep -Fq '`cargo test`' <<<"$OUTPUT"
 grep -Fq 'Prioritize quality over speed' <<<"$OUTPUT"
+grep -Fq 'chat model=rewrite reasoning_effort=high' "$TMP/mock.log"
 
 if grep -Fq '**Core Execution Pipeline:**' <<<"$OUTPUT"; then
   echo "integration failure: original AI-ish response leaked into final print output" >&2

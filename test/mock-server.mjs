@@ -187,7 +187,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.url === "/v1/chat/completions") {
       const model = String(body?.model ?? "");
-      console.log(`chat model=${model}`);
+      console.log(`chat model=${model} reasoning_effort=${String(body?.reasoning_effort ?? "")}`);
       if (model === "main") {
         const prompt = extractLastUserMessage(body);
         const hasToolResult = Array.isArray(body?.messages)
