@@ -188,7 +188,21 @@ async function rewriteWithConfiguredModel(
 
   const result = await stream.result();
   if (result.stopReason !== "stop") {
-    throw new Error(`Rewrite model stopped with ${result.stopReason}`);
+    const details = [
+      result.errorMessage,
+      result.rawStopReason ? `rawStopReason=${result.rawStopReason}` : undefined,
+      result.responseModel ? `responseModel=${result.responseModel}` : undefined,
+      result.providerThinkingLevel
+        ? `providerThinkingLevel=${result.providerThinkingLevel}`
+        : undefined,
+      result.diagnostics?.length
+        ? `diagnostics=${JSON.stringify(result.diagnostics)}`
+        : undefined,
+    ].filter(Boolean).join(" · ");
+
+    throw new Error(
+      `Rewrite model ${model.provider}/${model.id} stopped with ${result.stopReason}${details ? `: ${details}` : ""}`,
+    );
   }
 
   const raw = assistantText(result);
