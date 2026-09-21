@@ -7,7 +7,13 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Text } from "@earendil-works/pi-tui";
 import { loadConfig, saveConfig, type AntiSlopConfig, type AntiSlopMode } from "./config.js";
-import { assessStyle, validateRewrite, type StyleAssessment } from "./jev.js";
+import { formatLastAssessment, type LastAssessment } from "./diagnostics.js";
+import {
+  assessStyle,
+  validateRewrite,
+  type StyleAssessment,
+  type ValidationAssessment,
+} from "./jev.js";
 import { formatRewriteModelRef, parseRewriteModelRef } from "./model-ref.js";
 import { shouldProcessAssistant } from "./policy.js";
 import { protectLiterals, restoreLiterals, type ProtectedText } from "./protect.js";
@@ -262,6 +268,7 @@ export default function antiSlop(pi: ExtensionAPI): void {
   let lastUserRequest = "";
   let originalsVisible = false;
   let lastError = "";
+  let lastAssessment: LastAssessment | undefined;
   let pendingOriginalEntry: OriginalEntryData | undefined;
 
   const persist = () => saveConfig(config);
@@ -329,6 +336,11 @@ export default function antiSlop(pi: ExtensionAPI): void {
         return;
       }
 
+      if (command === "last") {
+        ctx.ui.notify(formatLastAssessment(lastAssessment), "info");
+        return;
+      }
+
       if (command === "mode") {
         const mode = args[1]?.toLowerCase() as AntiSlopMode | undefined;
         if (mode !== "off" && mode !== "final" && mode !== "all") {
@@ -392,7 +404,7 @@ export default function antiSlop(pi: ExtensionAPI): void {
       }
 
       ctx.ui.notify(
-        "Usage: /anti-slop [status|mode off|final|all|on|off|model [provider/model[:thinking]]|threshold 0..1|validation-threshold 0..1]",
+        "Usage: /anti-slop [status|last|mode off|final|all|on|off|model [provider/model[:thinking]]|threshold 0..1|validation-threshold 0..1]",
         "info",
       );
     },
@@ -400,6 +412,7 @@ export default function antiSlop(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     config = loadConfig();
+    lastAssessment = undefined;
     updateStatus(ctx, config, originalsVisible);
   });
 
@@ -423,7 +436,18 @@ export default function antiSlop(pi: ExtensionAPI): void {
 
     const apiKey = getJevApiKey();
     if (!apiKey) {
-      reportError(ctx, new Error("TYPESAFE_API_KEY is not configured"));
+      const error = "TYPESAFE_API_KEY is not configured";
+      lastAssessment = {
+        timestamp: Date.now(),
+        mode: config.mode,
+        stopReason: event.message.stopReason,
+        rewriteModel: config.rewriteModel,
+        rewriteThreshold: config.rewriteThreshold,
+        validationThreshold: config.validationThreshold,
+        result: "error",
+        error,
+      };
+      reportError(ctx, new Error(error));
       return;
     }
 
@@ -434,11 +458,25 @@ export default function antiSlop(pi: ExtensionAPI): void {
       signal: ctx.signal,
     };
 
+    let assessment: StyleAssessment | undefined;
+    let validation: ValidationAssessment | undefined;
+    let validationFallbackRecorded = false;
+
     try {
       ctx.ui.setStatus("anti-slop", "anti-slop: checking");
-      const assessment = await assessStyle(lastUserRequest, original, jevOptions);
+      assessment = await assessStyle(lastUserRequest, original, jevOptions);
 
       if (assessment.shouldRewrite < config.rewriteThreshold) {
+        lastAssessment = {
+          timestamp: Date.now(),
+          mode: config.mode,
+          stopReason: event.message.stopReason,
+          rewriteModel: config.rewriteModel,
+          rewriteThreshold: config.rewriteThreshold,
+          validationThreshold: config.validationThreshold,
+          result: "not-rewritten",
+          style: assessment,
+        };
         lastError = "";
         return;
       }
@@ -453,12 +491,22 @@ export default function antiSlop(pi: ExtensionAPI): void {
       );
 
       if (!rewrite.text || rewrite.text === original) {
+        lastAssessment = {
+          timestamp: Date.now(),
+          mode: config.mode,
+          stopReason: event.message.stopReason,
+          rewriteModel: config.rewriteModel,
+          rewriteThreshold: config.rewriteThreshold,
+          validationThreshold: config.validationThreshold,
+          result: "unchanged",
+          style: assessment,
+        };
         lastError = "";
         return;
       }
 
       ctx.ui.setStatus("anti-slop", "anti-slop: validating");
-      const validation = await validateRewrite(original, rewrite.text, jevOptions);
+      validation = await validateRewrite(original, rewrite.text, jevOptions);
       const validationValues = [
         validation.meaningPreserved,
         validation.noNewFacts,
@@ -466,9 +514,21 @@ export default function antiSlop(pi: ExtensionAPI): void {
       ];
 
       if (validationValues.some((value) => value < config.validationThreshold)) {
-        throw new Error(
-          `rewrite failed validation (${validationValues.map((v) => v.toFixed(2)).join(", ")})`,
-        );
+        const error = `rewrite failed validation (${validationValues.map((v) => v.toFixed(2)).join(", ")})`;
+        lastAssessment = {
+          timestamp: Date.now(),
+          mode: config.mode,
+          stopReason: event.message.stopReason,
+          rewriteModel: config.rewriteModel,
+          rewriteThreshold: config.rewriteThreshold,
+          validationThreshold: config.validationThreshold,
+          result: "validation-fallback",
+          style: assessment,
+          validation,
+          error,
+        };
+        validationFallbackRecorded = true;
+        throw new Error(error);
       }
 
       pendingOriginalEntry = {
@@ -478,11 +538,38 @@ export default function antiSlop(pi: ExtensionAPI): void {
         timestamp: Date.now(),
       };
 
+      lastAssessment = {
+        timestamp: Date.now(),
+        mode: config.mode,
+        stopReason: event.message.stopReason,
+        rewriteModel: config.rewriteModel,
+        rewriteThreshold: config.rewriteThreshold,
+        validationThreshold: config.validationThreshold,
+        result: "rewritten",
+        style: assessment,
+        validation,
+      };
+
       lastError = "";
       return {
         message: replaceAssistantTextBlocks(event.message, rewrite.blocks),
       };
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!validationFallbackRecorded) {
+        lastAssessment = {
+          timestamp: Date.now(),
+          mode: config.mode,
+          stopReason: event.message.stopReason,
+          rewriteModel: config.rewriteModel,
+          rewriteThreshold: config.rewriteThreshold,
+          validationThreshold: config.validationThreshold,
+          result: "error",
+          style: assessment,
+          validation,
+          error: message,
+        };
+      }
       reportError(ctx, error);
       return;
     } finally {

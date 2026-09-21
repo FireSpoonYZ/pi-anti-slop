@@ -279,12 +279,17 @@ set +e
 {
   sleep 0.8
   printf '\033\017'
-  sleep 0.4
+  sleep 0.3
+  printf '/anti-slop last\r'
+  sleep 0.5
   printf '\004'
-} | TERM=xterm-256color timeout 4s script -qefc "$TUI_CMD" "$TMP/tui.log" >/dev/null 2>&1
+} | TERM=xterm-256color timeout 5s script -qefc "$TUI_CMD" "$TMP/tui.log" >/dev/null 2>&1
 set -e
 
 grep -aFq 'original response hidden' "$TMP/tui.log"
 grep -aFq '[anti-slop original]' "$TMP/tui.log"
+grep -aFq 'anti-slop last · result=rewritten' "$TMP/tui.log"
+grep -aFq 'should_rewrite=0.980' "$TMP/tui.log"
+grep -aFq 'meaning_preserved' "$TMP/tui.log"
 
-echo "integration: final/all mode routing, rewrite, no-rewrite, validation fallback, tool-call preservation, session ordering, and TUI original toggle passed"
+echo "integration: final/all mode routing, rewrite, no-rewrite, validation fallback, tool-call preservation, session ordering, TUI original toggle, and /anti-slop last passed"

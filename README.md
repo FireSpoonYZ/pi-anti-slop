@@ -96,6 +96,7 @@ Configuration is stored in `~/.pi/agent/anti-slop.json` by default. The default 
 
 ```text
 /anti-slop status
+/anti-slop last
 /anti-slop mode off
 /anti-slop mode final
 /anti-slop mode all
@@ -107,6 +108,8 @@ Configuration is stored in `~/.pi/agent/anti-slop.json` by default. The default 
 For compatibility, `/anti-slop on` is an alias for `mode final`, and `/anti-slop off` is an alias for `mode off`.
 
 The default rewrite threshold is `0.72`; the default post-rewrite validation threshold is `0.84`.
+
+`/anti-slop last` shows the most recent Jev decision in the current session, including `should_rewrite`, all style probabilities, the thresholds, rewrite model, final result, validation probabilities when applicable, and any fallback/error reason. It also records below-threshold decisions, so you can distinguish “Jev ran and chose not to rewrite” from “the hook did not run”.
 
 Press `Ctrl+Alt+O` to toggle the original responses hidden by the extension. The original response is rendered as Markdown when expanded.
 
@@ -139,6 +142,7 @@ The Docker suite performs TypeScript checking, unit tests, and a Pi 0.86.1 end-t
 - failed post-rewrite validation falling back to the original
 - persisted session ordering: rewritten assistant response first, hidden original entry second
 - real PTY playback of `Ctrl+Alt+O`, verifying the hidden original expands in Pi's TUI
+- real TUI execution of `/anti-slop last`, verifying the latest Jev decision and validation metrics are visible
 
 ## Notes
 
