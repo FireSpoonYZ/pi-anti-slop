@@ -259,8 +259,17 @@ const server = http.createServer(async (req, res) => {
         const literalClause = tokens[0] ? ` Run ${tokens[0]}.` : "";
         const { start, end } = extractFinalMarkers(body);
 
+        if (prompt.includes("[NO_MARKER]")) {
+          streamChat(
+            res,
+            model,
+            `Improve the wording without changing the substance.${literalClause} Prioritize quality over speed, then continue.`,
+          );
+          return;
+        }
+
         if (prompt.includes("[BAD_MARKER]")) {
-          streamChat(res, model, "final text without integration markers");
+          streamChat(res, model, `${start}\npartial protocol only`);
           return;
         }
 

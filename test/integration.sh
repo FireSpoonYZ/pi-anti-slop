@@ -269,13 +269,23 @@ if (( REWRITE_COUNT_AFTER - REWRITE_COUNT_BEFORE != 1 )); then
   exit 1
 fi
 
-# No post-rewrite judging: the only fallback is mechanical protocol failure.
+# Markerless Embedded-mode output is accepted as the final rewrite.
+REWRITE_COUNT_BEFORE="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
+NO_MARKER_OUTPUT="$(run_pi "[NO_MARKER] Explain the recommended execution approach.")"
+REWRITE_COUNT_AFTER="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
+grep -Fq 'Improve the wording without changing the substance.' <<<"$NO_MARKER_OUTPUT"
+if (( REWRITE_COUNT_AFTER - REWRITE_COUNT_BEFORE != 1 )); then
+  echo "integration failure: markerless rewrite did not reach the rewrite model" >&2
+  exit 1
+fi
+
+# A partial marker protocol still fails closed to the original response.
 REWRITE_COUNT_BEFORE="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
 BAD_MARKER_OUTPUT="$(run_pi "[BAD_MARKER] Explain the recommended execution approach.")"
 REWRITE_COUNT_AFTER="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
 grep -Fq '**Core Execution Pipeline:**' <<<"$BAD_MARKER_OUTPUT"
 if (( REWRITE_COUNT_AFTER - REWRITE_COUNT_BEFORE != 1 )); then
-  echo "integration failure: bad-marker case did not reach the rewrite model" >&2
+  echo "integration failure: partial-marker case did not reach the rewrite model" >&2
   exit 1
 fi
 

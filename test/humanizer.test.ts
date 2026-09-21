@@ -99,7 +99,7 @@ test("rewrite prompt embeds both Humanizer skills and final markers", () => {
   assert.match(prompt, /<<<END>>>/);
 });
 
-test("extracts exactly one Humanizer final payload", () => {
+test("extracts marked final payload and accepts markerless Embedded-mode output", () => {
   assert.equal(
     extractHumanizerFinal(
       "noise\n<<<START>>>\nfinal text\n<<<END>>>\nnoise",
@@ -108,6 +108,25 @@ test("extracts exactly one Humanizer final payload", () => {
     ),
     "final text",
   );
+
+  assert.equal(
+    extractHumanizerFinal(
+      "final text without synthetic markers",
+      "<<<START>>>",
+      "<<<END>>>",
+    ),
+    "final text without synthetic markers",
+  );
+
+  assert.throws(
+    () => extractHumanizerFinal(
+      "<<<START>>>partial protocol only",
+      "<<<START>>>",
+      "<<<END>>>",
+    ),
+    /partial or out of order/,
+  );
+
   assert.throws(
     () => extractHumanizerFinal(
       "<<<START>>>a<<<START>>>b<<<END>>>",

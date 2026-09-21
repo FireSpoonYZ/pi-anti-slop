@@ -1,6 +1,6 @@
 {
   "name": "pi-anti-slop",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Pi extension that gates assistant output with Jev and rewrites matching text using vendored Humanizer and Humanizer Technical skills.",
   "type": "module",
   "keywords": [

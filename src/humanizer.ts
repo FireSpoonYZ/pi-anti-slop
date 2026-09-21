@@ -172,15 +172,30 @@ export function buildHumanizerRewriteSystemPrompt(startMarker: string, endMarker
     "Do not flatten technical depth merely to make prose smoother. Humanizer Technical specifically prefers uneven editorial emphasis when the substance is unequal.",
     "Protected __PI_ANTI_SLOP_LITERAL_*__ placeholders and __PI_ANTI_SLOP_BLOCK_BREAK_*__ markers are part of the integration protocol. Keep each exactly unchanged, exactly once, and in the same order.",
     "Return only the final rewrite. Do not return the draft, critique, tell list, explanations, or commentary.",
-    `Wrap the final rewrite exactly once between these two markers:\n${startMarker}\n<final rewrite>\n${endMarker}`,
+    `Prefer wrapping the final rewrite exactly once between these two markers:\n${startMarker}\n<final rewrite>\n${endMarker}`,
+    "If you omit the markers, the entire visible response must still be only the final rewrite.",
   ].join("\n");
 }
 
 export function extractHumanizerFinal(raw: string, startMarker: string, endMarker: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error("Humanizer final rewrite was empty");
+
   const start = raw.indexOf(startMarker);
   const end = raw.indexOf(endMarker);
+
+  // Embedded mode already asks the model to return only the final text.
+  // Some providers/models ignore synthetic boundary markers even when they
+  // otherwise follow the instruction correctly. In that case the entire
+  // visible response is the final rewrite.
+  if (start < 0 && end < 0) {
+    return trimmed;
+  }
+
+  // A partial marker protocol is different: it means the model leaked or
+  // truncated integration syntax, so fail closed to the original response.
   if (start < 0 || end < 0 || end <= start) {
-    throw new Error("Humanizer final markers were missing or out of order");
+    throw new Error("Humanizer final markers were partial or out of order");
   }
   if (raw.indexOf(startMarker, start + startMarker.length) !== -1) {
     throw new Error("Humanizer start marker was duplicated");
