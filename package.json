@@ -1,13 +1,30 @@
 {
   "name": "pi-anti-slop",
-  "version": "0.1.0",
-  "description": "Pi extension that uses Jev to detect AI-ish prose and optionally rewrites the final response.",
+  "version": "0.2.0",
+  "description": "Pi extension that gates assistant output with Jev and rewrites matching text using the vendored Humanizer skill.",
   "type": "module",
-  "keywords": ["pi-package", "pi-extension", "jev", "writing"],
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "jev",
+    "humanizer",
+    "writing"
+  ],
   "license": "MIT",
-  "files": ["src", "README.md"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FireSpoonYZ/pi-anti-slop.git"
+  },
+  "homepage": "https://github.com/FireSpoonYZ/pi-anti-slop",
+  "files": [
+    "src",
+    "vendor",
+    "README.md"
+  ],
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "scripts": {
     "test": "node --import tsx --test test/*.test.ts",

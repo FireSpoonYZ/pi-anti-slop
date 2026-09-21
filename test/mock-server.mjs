@@ -29,31 +29,28 @@ function json(res, status, value) {
 
 function answerJev(body) {
   const answers = {};
-  const state = body?.state ?? {};
-  const isValidation = "rewritten_response" in state;
-  const noRewrite = String(state.user_request ?? "").includes("[NO_REWRITE]");
-  const validationFail = String(state.rewritten_response ?? "").includes("[VALIDATION_FAIL]");
+  const request = String(body?.state?.user_request ?? "");
+  const noRewrite = request.includes("[NO_REWRITE]");
+  const weakOne = request.includes("[WEAK_ONE]");
+  const weakTwo = request.includes("[WEAK_TWO]");
 
   for (const key of Object.keys(body?.questions ?? {})) {
     let p = 0.08;
-    if (isValidation) p = validationFail ? 0.2 : 0.99;
-    else if (key === "should_rewrite") p = noRewrite ? 0.12 : 0.98;
-    else if (key === "telegraphic_noun_stacking") p = 0.96;
-    else if (key === "formatting_overuse") p = 0.88;
-    else if (key === "canned_contrast") p = 0.82;
+    if (!noRewrite && !weakOne && !weakTwo && key === "pattern_01_not_x_but_y") p = 0.98;
+    if (weakOne && key === "pattern_08_dashes_as_the_universal_connector") p = 0.21;
+    if (weakTwo && key === "pattern_08_dashes_as_the_universal_connector") p = 0.91;
+    if (weakTwo && key === "pattern_09_stacked_qualifiers") p = 0.87;
     answers[key] = { noul: p };
   }
 
   return { answers };
 }
 
-function extractLastUserMessage(body) {
-  const messages = Array.isArray(body?.messages) ? body.messages : [];
-  const lastUser = [...messages].reverse().find((m) => m?.role === "user");
-  if (!lastUser) return "";
-  if (typeof lastUser.content === "string") return lastUser.content;
-  if (Array.isArray(lastUser.content)) {
-    return lastUser.content
+function messageText(message) {
+  if (!message) return "";
+  if (typeof message.content === "string") return message.content;
+  if (Array.isArray(message.content)) {
+    return message.content
       .filter((part) => part && (part.type === "text" || part.type === "input_text"))
       .map((part) => String(part.text ?? ""))
       .join("\n");
@@ -61,8 +58,36 @@ function extractLastUserMessage(body) {
   return "";
 }
 
+function extractLastUserMessage(body) {
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  const lastUser = [...messages].reverse().find((m) => m?.role === "user");
+  return messageText(lastUser);
+}
+
 function extractLiteralTokens(text) {
   return [...text.matchAll(/__PI_ANTI_SLOP_LITERAL_\d+__/g)].map((m) => m[0]);
+}
+
+function extractSystemText(body) {
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  const system = messages.find((message) => message?.role === "system" || message?.role === "developer");
+  if (!system) return "";
+  if (typeof system.content === "string") return system.content;
+  if (Array.isArray(system.content)) {
+    return system.content
+      .filter((part) => part && (part.type === "text" || part.type === "input_text"))
+      .map((part) => String(part.text ?? ""))
+      .join("\n");
+  }
+  return "";
+}
+
+function extractFinalMarkers(body) {
+  const system = extractSystemText(body);
+  const start = system.match(/<<<PI_ANTI_SLOP_FINAL:[a-f0-9]+>>>/)?.[0];
+  const end = system.match(/<<<PI_ANTI_SLOP_END:[a-f0-9]+>>>/)?.[0];
+  if (!start || !end) throw new Error("rewrite request did not include final markers");
+  return { start, end };
 }
 
 function beginStream(res) {
@@ -190,8 +215,19 @@ const server = http.createServer(async (req, res) => {
       console.log(`chat model=${model} reasoning_effort=${String(body?.reasoning_effort ?? "")}`);
       if (model === "main") {
         const prompt = extractLastUserMessage(body);
-        const hasToolResult = Array.isArray(body?.messages)
-          && body.messages.some((message) => message?.role === "tool");
+        const messages = Array.isArray(body?.messages) ? body.messages : [];
+        const hasToolResult = messages.some((message) => message?.role === "tool");
+
+        if (prompt.includes("[HISTORY_CHECK]")) {
+          const priorAssistant = messages
+            .filter((message) => message?.role === "assistant")
+            .map(messageText)
+            .join("\n");
+          const ok = priorAssistant.includes("Improve the wording without changing the substance.")
+            && !priorAssistant.includes("**Core Execution Pipeline:**");
+          streamChat(res, model, ok ? "history-ok" : "history-bad");
+          return;
+        }
 
         if (prompt.includes("[TOOL_USE]") && !hasToolResult) {
           streamToolCall(res, model);
@@ -219,11 +255,17 @@ const server = http.createServer(async (req, res) => {
         const prompt = extractLastUserMessage(body);
         const tokens = extractLiteralTokens(prompt);
         const literalClause = tokens[0] ? ` Run ${tokens[0]}.` : "";
-        const validationMarker = prompt.includes("[VALIDATION_FAIL]") ? " [VALIDATION_FAIL]" : "";
+        const { start, end } = extractFinalMarkers(body);
+
+        if (prompt.includes("[BAD_MARKER]")) {
+          streamChat(res, model, "final text without integration markers");
+          return;
+        }
+
         streamChat(
           res,
           model,
-          `Improve the wording without changing the substance.${literalClause} Prioritize quality over speed, then continue.${validationMarker}`,
+          `${start}\nImprove the wording without changing the substance.${literalClause} Prioritize quality over speed, then continue.\n${end}`,
         );
         return;
       }

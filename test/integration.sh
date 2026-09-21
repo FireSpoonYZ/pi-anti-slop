@@ -48,7 +48,15 @@ cat > "$PI_CODING_AGENT_DIR/models.json" <<'JSON'
           "id": "rewrite",
           "name": "Mock Rewrite",
           "reasoning": true,
-          "thinkingLevelMap": {"off":"none","minimal":"minimal","low":"low","medium":"medium","high":"high","xhigh":"xhigh","max":"max"},
+          "thinkingLevelMap": {
+            "off": "none",
+            "minimal": "minimal",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          },
           "input": ["text"],
           "contextWindow": 32000,
           "maxTokens": 4096,
@@ -64,8 +72,6 @@ cat > "$PI_ANTI_SLOP_CONFIG" <<'JSON'
 {
   "mode": "final",
   "rewriteModel": "mock/rewrite:high",
-  "rewriteThreshold": 0.72,
-  "validationThreshold": 0.84,
   "jevModel": "jev-latest",
   "shortcut": "ctrl+alt+o"
 }
@@ -90,6 +96,13 @@ config.mode = mode;
 delete config.enabled;
 fs.writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
 NODE
+}
+
+latest_session() {
+  find "$PI_CODING_AGENT_SESSION_DIR" -type f -name '*.jsonl' -printf '%T@ %p\n' |
+    sort -nr |
+    head -n 1 |
+    cut -d' ' -f2-
 }
 
 run_pi() {
@@ -126,18 +139,27 @@ run_pi_with_read() {
     "$1" 2>&1
 }
 
-set +e
+run_pi_session() {
+  local session_file="$1"
+  local prompt="$2"
+  "$ROOT/node_modules/.bin/pi" \
+    --offline \
+    --no-context-files \
+    --no-skills \
+    --no-prompt-templates \
+    --no-themes \
+    --no-extensions \
+    --extension "$ROOT/src/index.ts" \
+    --provider mock \
+    --model main \
+    --no-tools \
+    --session "$session_file" \
+    -p \
+    "$prompt" 2>&1
+}
+
+# A Humanizer one-sighting tell triggers rewriting.
 OUTPUT="$(run_pi "Explain the recommended execution approach.")"
-STATUS=$?
-set -e
-
-if [[ $STATUS -ne 0 ]]; then
-  printf '%s\n' "$OUTPUT"
-  printf '%s\n' "---- mock log ----"
-  cat "$TMP/mock.log"
-  exit $STATUS
-fi
-
 printf '%s\n' "$OUTPUT"
 
 grep -Fq 'Improve the wording without changing the substance.' <<<"$OUTPUT"
@@ -150,7 +172,7 @@ if grep -Fq '**Core Execution Pipeline:**' <<<"$OUTPUT"; then
   exit 1
 fi
 
-SESSION_FILE="$(find "$PI_CODING_AGENT_SESSION_DIR" -type f -name '*.jsonl' | head -n 1)"
+SESSION_FILE="$(latest_session)"
 if [[ -z "$SESSION_FILE" ]]; then
   echo "integration failure: Pi did not persist a session file" >&2
   exit 1
@@ -191,7 +213,7 @@ const rewrittenText = assistant.message.content
   .join("\n");
 
 if (!rewrittenText.includes("Improve the wording without changing the substance.")) {
-  throw new Error("session did not persist the rewritten assistant text");
+  throw new Error("session did not persist the Humanizer rewrite");
 }
 
 if (!original.data?.original?.includes("**Core Execution Pipeline:**")) {
@@ -199,23 +221,55 @@ if (!original.data?.original?.includes("**Core Execution Pipeline:**")) {
 }
 NODE
 
+# Future primary-model context sees the rewritten assistant message, not the hidden custom original.
+HISTORY_OUTPUT="$(run_pi_session "$SESSION_FILE" "[NO_REWRITE][HISTORY_CHECK] Check history.")"
+grep -Fq 'history-ok' <<<"$HISTORY_OUTPUT"
+if grep -Fq 'history-bad' <<<"$HISTORY_OUTPUT"; then
+  echo "integration failure: primary model saw the original assistant history" >&2
+  exit 1
+fi
+
+# No tells -> keep.
 REWRITE_COUNT_BEFORE="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
 NO_REWRITE_OUTPUT="$(run_pi "[NO_REWRITE] Explain the recommended execution approach.")"
 REWRITE_COUNT_AFTER="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
-
 grep -Fq '**Core Execution Pipeline:**' <<<"$NO_REWRITE_OUTPUT"
 if [[ "$REWRITE_COUNT_BEFORE" != "$REWRITE_COUNT_AFTER" ]]; then
-  echo "integration failure: rewrite model was called below Jev threshold" >&2
+  echo "integration failure: rewrite model was called when Humanizer marked no tells" >&2
   exit 1
 fi
 
-VALIDATION_FAIL_OUTPUT="$(run_pi "[VALIDATION_FAIL] Explain the recommended execution approach.")"
-grep -Fq '**Core Execution Pipeline:**' <<<"$VALIDATION_FAIL_OUTPUT"
-if grep -Fq 'Improve the wording without changing the substance.' <<<"$VALIDATION_FAIL_OUTPUT"; then
-  echo "integration failure: failed rewrite validation did not fall back to original" >&2
+# One weak-alone tell -> keep.
+REWRITE_COUNT_BEFORE="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
+WEAK_ONE_OUTPUT="$(run_pi "[WEAK_ONE] Explain the recommended execution approach.")"
+REWRITE_COUNT_AFTER="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
+grep -Fq '**Core Execution Pipeline:**' <<<"$WEAK_ONE_OUTPUT"
+if [[ "$REWRITE_COUNT_BEFORE" != "$REWRITE_COUNT_AFTER" ]]; then
+  echo "integration failure: one weak-alone Humanizer tell triggered rewriting" >&2
   exit 1
 fi
 
+# Two weak-alone tells have company -> rewrite.
+REWRITE_COUNT_BEFORE="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
+WEAK_TWO_OUTPUT="$(run_pi "[WEAK_TWO] Explain the recommended execution approach.")"
+REWRITE_COUNT_AFTER="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
+grep -Fq 'Improve the wording without changing the substance.' <<<"$WEAK_TWO_OUTPUT"
+if (( REWRITE_COUNT_AFTER - REWRITE_COUNT_BEFORE != 1 )); then
+  echo "integration failure: two weak-alone Humanizer tells did not trigger rewriting" >&2
+  exit 1
+fi
+
+# No post-rewrite judging: the only fallback is mechanical protocol failure.
+REWRITE_COUNT_BEFORE="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
+BAD_MARKER_OUTPUT="$(run_pi "[BAD_MARKER] Explain the recommended execution approach.")"
+REWRITE_COUNT_AFTER="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
+grep -Fq '**Core Execution Pipeline:**' <<<"$BAD_MARKER_OUTPUT"
+if (( REWRITE_COUNT_AFTER - REWRITE_COUNT_BEFORE != 1 )); then
+  echo "integration failure: bad-marker case did not reach the rewrite model" >&2
+  exit 1
+fi
+
+# final/all routing still works; tool calls are preserved.
 set_mode final
 FINAL_TOOL_REWRITES_BEFORE="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
 run_pi_with_read "[TOOL_USE] Inspect the hostname and answer." >/dev/null
@@ -231,16 +285,10 @@ run_pi_with_read "[TOOL_USE] Inspect the hostname and answer." >/dev/null
 ALL_TOOL_REWRITES_AFTER="$(grep -c 'chat model=rewrite' "$TMP/mock.log" || true)"
 if (( ALL_TOOL_REWRITES_AFTER - ALL_TOOL_REWRITES_BEFORE != 2 )); then
   echo "integration failure: all mode should rewrite both toolUse and final stop turns" >&2
-  echo "rewrite-count-before=$ALL_TOOL_REWRITES_BEFORE after=$ALL_TOOL_REWRITES_AFTER" >&2
-  echo "---- mock log ----" >&2
-  tail -80 "$TMP/mock.log" >&2
-  echo "---- latest session ----" >&2
-  DEBUG_SESSION="$(find "$PI_CODING_AGENT_SESSION_DIR" -type f -name '*.jsonl' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
-  cat "$DEBUG_SESSION" >&2 || true
   exit 1
 fi
 
-ALL_SESSION_FILE="$(find "$PI_CODING_AGENT_SESSION_DIR" -type f -name '*.jsonl' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
+ALL_SESSION_FILE="$(latest_session)"
 node - "$ALL_SESSION_FILE" <<'NODE'
 import fs from "node:fs";
 
@@ -258,8 +306,8 @@ const toolUse = entries.find(
 if (!toolUse) throw new Error("missing toolUse assistant turn");
 
 const call = toolUse.message.content.find((part) => part.type === "toolCall");
-if (!call || call.name !== "read") {
-  throw new Error("all mode altered or removed the tool call");
+if (!call || call.id !== "call_read_hostname" || call.name !== "read") {
+  throw new Error(`all mode altered or removed the tool call: ${JSON.stringify(call)}`);
 }
 
 const text = toolUse.message.content
@@ -267,12 +315,12 @@ const text = toolUse.message.content
   .map((part) => part.text)
   .join("\n");
 if (!text.includes("Improve the wording without changing the substance.")) {
-  throw new Error("all mode did not rewrite toolUse text");
+  throw new Error("all mode did not Humanize toolUse text");
 }
 NODE
 
+# Real TUI shortcut and /anti-slop last.
 set_mode final
-
 TUI_CMD="$ROOT/node_modules/.bin/pi --offline --no-context-files --no-skills --no-prompt-templates --no-themes --no-extensions --extension $ROOT/src/index.ts --provider mock --model main --no-tools --session-dir $PI_CODING_AGENT_SESSION_DIR 'Explain the recommended execution approach.'"
 
 set +e
@@ -289,7 +337,8 @@ set -e
 grep -aFq 'original response hidden' "$TMP/tui.log"
 grep -aFq '[anti-slop original]' "$TMP/tui.log"
 grep -aFq 'anti-slop last · result=rewritten' "$TMP/tui.log"
-grep -aFq 'should_rewrite=0.980' "$TMP/tui.log"
-grep -aFq 'meaning_preserved' "$TMP/tui.log"
+grep -aFq 'Humanizer=3.0.0@9862685' "$TMP/tui.log"
+grep -aFq 'decision=REWRITE' "$TMP/tui.log"
+grep -aFq '§01 Not X but Y' "$TMP/tui.log"
 
-echo "integration: final/all mode routing, rewrite, no-rewrite, validation fallback, tool-call preservation, session ordering, TUI original toggle, and /anti-slop last passed"
+echo "integration: Humanizer gate, weak-company policy, embedded rewrite, history replacement, final/all routing, tool-call preservation, fallback, TUI toggle, and /anti-slop last passed"

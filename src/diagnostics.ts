@@ -1,10 +1,16 @@
-import type { StyleAssessment, ValidationAssessment } from "./jev.js";
+import {
+  HUMANIZER_COMMIT,
+  HUMANIZER_VERSION,
+  NOUL_TRUE_THRESHOLD,
+  type HumanizerAssessment,
+  type HumanizerDecision,
+} from "./humanizer.js";
 
 export type LastResult =
-  | "not-rewritten"
+  | "kept"
   | "unchanged"
   | "rewritten"
-  | "validation-fallback"
+  | "fallback"
   | "error";
 
 export interface LastAssessment {
@@ -12,16 +18,14 @@ export interface LastAssessment {
   mode: string;
   stopReason: string;
   rewriteModel?: string;
-  rewriteThreshold: number;
-  validationThreshold: number;
   result: LastResult;
-  style?: StyleAssessment;
-  validation?: ValidationAssessment;
+  assessment?: HumanizerAssessment;
+  decision?: HumanizerDecision;
   error?: string;
 }
 
-function formatProbability(value: number | undefined): string {
-  return value === undefined ? "-" : value.toFixed(3);
+function formatProbability(value: number): string {
+  return value.toFixed(3);
 }
 
 export function formatLastAssessment(last: LastAssessment | undefined): string {
@@ -29,39 +33,32 @@ export function formatLastAssessment(last: LastAssessment | undefined): string {
 
   const lines = [
     `anti-slop last · result=${last.result}`,
+    `Humanizer=${HUMANIZER_VERSION}@${HUMANIZER_COMMIT.slice(0, 7)} · Noul true > ${NOUL_TRUE_THRESHOLD.toFixed(2)}`,
     `mode=${last.mode} · stopReason=${last.stopReason}`,
     `model=${last.rewriteModel ?? "(not set)"}`,
   ];
 
-  if (last.style) {
+  if (last.decision) {
     lines.push(
-      `should_rewrite=${formatProbability(last.style.shouldRewrite)} · threshold=${last.rewriteThreshold.toFixed(3)}`,
-      "",
-      "Style:",
+      `decision=${last.decision.rewrite ? "REWRITE" : "KEEP"}`,
+      `reason=${last.decision.reason}`,
     );
+  }
 
-    const styleEntries = Object.entries(last.style.probabilities)
-      .filter(([id]) => id !== "should_rewrite")
-      .sort((a, b) => b[1] - a[1]);
-
-    for (const [id, probability] of styleEntries) {
-      lines.push(`  ${id.padEnd(28)} ${formatProbability(probability)}`);
+  if (last.assessment) {
+    lines.push("", "Humanizer patterns:");
+    for (const score of last.assessment.scores) {
+      const flags = [
+        score.present ? "HIT" : "",
+        score.pattern.oneSighting ? "ONE-SIGHTING" : "",
+        score.pattern.weakAlone ? "WEAK-ALONE" : "",
+      ].filter(Boolean).join(" ");
+      lines.push(
+        `  §${String(score.pattern.number).padStart(2, "0")} ${score.pattern.title.padEnd(38)} ${formatProbability(score.probability)}${flags ? `  ${flags}` : ""}`,
+      );
     }
   }
 
-  if (last.validation) {
-    lines.push(
-      "",
-      `Validation · threshold=${last.validationThreshold.toFixed(3)}:`,
-      `  meaning_preserved            ${formatProbability(last.validation.meaningPreserved)}`,
-      `  no_new_facts                 ${formatProbability(last.validation.noNewFacts)}`,
-      `  technical_literals_preserved ${formatProbability(last.validation.technicalLiteralsPreserved)}`,
-    );
-  }
-
-  if (last.error) {
-    lines.push("", `error=${last.error}`);
-  }
-
+  if (last.error) lines.push("", `error=${last.error}`);
   return lines.join("\n");
 }
